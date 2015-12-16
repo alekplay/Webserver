@@ -27,11 +27,13 @@ char *getFileExtension(char *filename) {
 	return dot + 1;
 }
 
+// Function to get the path from the request
 char *getRequestPath(char *request, int inset) {
 	char *filePath = malloc(256);
 	
+	// Go through each character, beginning at the inset ("GET /") and stopping at space, new line, end, or parameter
 	int i;
-	for (i = inset; request[i] != ' ' && request[i] != '\n' && request[i] != '\0'; i++) {
+	for (i = inset; request[i] != ' ' && request[i] != '\n' && request[i] != '\0' && request[i] != '?'; i++) {
    		filePath[i - inset] = request[i];
 	}
 	filePath[i - inset] = 0;
@@ -39,7 +41,37 @@ char *getRequestPath(char *request, int inset) {
 	return filePath;
 }
 
-void http_error(int errorCode, int client){
+// Function to get the parameters from the request, add to array
+int getRequestParameters(char const *request, char *array[]) {
+	// Get the string after '?'
+	char *truncatedString = strstr(request, "?");
+	truncatedString++;
+	
+	char *parameterString = malloc(256);
+
+	// Return if no parameters
+	if (truncatedString == NULL) return 0;
+
+	// Go through the string, stopping at space, newline, or terminating character
+	int i;
+	for (i = 0; truncatedString[i] != ' ' && request[i] != '\n' && request[i] != '\0'; i++) {
+		parameterString[i] = truncatedString[i];
+	}
+	parameterString[i] = 0;
+
+	// Tokenize the parameters
+	i = 0;
+	char *token = strtok(parameterString, "&");
+	while (token != NULL) {
+		array[i++] = token;
+		token = strtok(NULL, "&");
+	}
+
+	return i;
+}
+
+// Function to print http error and end
+void throwHttpError(int errorCode, int client){
 	char *buffer = malloc(256);
     
 	switch(errorCode){
@@ -71,31 +103,7 @@ void http_error(int errorCode, int client){
     exit(0);
 }
 
-int create_bind(char *num) {
-	int portNum, sockNum;
-	struct sockaddr_in serverAddr;
-
-	portNum = atoi(num);
-
-	if ((sockNum = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
-		fprintf(stderr, "**(Error code 3)\n");
-		exit(1);
-	}
-
-	serverAddr.sin_family = AF_INET;
-	serverAddr.sin_addr.s_addr = htonl(INADDR_ANY);
-	serverAddr.sin_port = htons(portNum);
-
-	int size = sizeof(serverAddr);
-
-	if (bind(sockNum, (struct sockaddr *) &serverAddr, size) == -1) {
-		perror("Error: could not bind.\n");
-		exit(1);
-	}
-
-	return sockNum;
-}
-
+// Function to handle a request from a client
 int getRequest(int client) {
 	char output[4096];
 
@@ -105,7 +113,7 @@ int getRequest(int client) {
 
 	// Throw error if not GET request
 	if (strncmp(buffer, "GET ", 4) != 0) {
-		http_error(501, client);
+		throwHttpError(501, client);
 		exit(1);
 	}
 
@@ -120,7 +128,7 @@ int getRequest(int client) {
 	// Check if file at path exists
 	FILE *file;
 	if ((file = fopen(filePath, "r")) == NULL) {
-		http_error(404, client);
+		throwHttpError(404, client);
 		exit(1);
 	}
 
@@ -180,6 +188,10 @@ int getRequest(int client) {
 			fgets(output, sizeof(output), file);
 		}
 	} else if (strcmp(fileType, "cgi") == 0) {
+		// Get possible arguments for histogram		
+		char *array[5];
+		int numParam = getRequestParameters(buffer, array);
+
 		// Create a pipe to redirect the output
 		int pipe1[1];
 		pipe(pipe1);
@@ -190,8 +202,20 @@ int getRequest(int client) {
 			dup2(pipe1[1], 1);
 			close(pipe1[0]);
 			
-			// Execute the script at filePath
-			execl(filePath, filePath, NULL);
+			// Execute the script at filePath with the given parameters
+			if (numParam == 0) {
+				execl(filePath, filePath, NULL);
+			} else if (numParam == 2) {
+				execl(filePath, filePath, array[0], array[1], NULL);
+			} else if (numParam == 3) {
+				execl(filePath, filePath, array[0], array[1], array[2], NULL);
+			} else if (numParam == 4) {
+				execl(filePath, filePath, array[0], array[1], array[2], array[3], NULL);
+			} else if (numParam == 5) {
+				execl(filePath, filePath, array[0], array[1], array[2], array[3], array[4], NULL);
+			} else if (numParam == 6) {
+				execl(filePath, filePath, array[0], array[1], array[2], array[3], array[4], array[5], NULL);
+			}
 
 			exit(0);
 		} else {
@@ -227,7 +251,7 @@ int getRequest(int client) {
 			closedir(directory);
 		} else {
 			// Print error if directory can't be found/ opened
-			http_error(404, client);
+			throwHttpError(404, client);
 		}
 	}
 
@@ -238,14 +262,36 @@ int getRequest(int client) {
 }
 
 int main(int argc, char *argv[]) {
-	
+	int sockFd;
+	struct sockaddr_in serverAddr;
+
+	// Convert the port number to integer
+	int portNum = atoi(argv[1]);
+
+	// Open socket
+	if ((sockFd = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
+		fprintf(stderr, "* ERROR: could not open socket\n");
+		exit(1);
+	}
+
+	// Set up socket address
+	serverAddr.sin_family = AF_INET;
+	serverAddr.sin_addr.s_addr = htonl(INADDR_ANY);
+	serverAddr.sin_port = htons(portNum);
+
+	// Bind socket to server address
+	int size = sizeof(serverAddr);
+	if (bind(sockFd, (struct sockaddr *) &serverAddr, size) == -1) {
+		perror("* ERROR: could not bind\n");
+		exit(1);
+	}
+
 	// Listen for connections
-	int sockFd = create_bind(argv[1]);
 	if (listen(sockFd, 10) < 0) {
 		fprintf(stderr, "* ERROR: issues listening for a connection\n");
 	}
 
-	printf("* Web Server is online!\n");
+	printf("* STATUS: web server is online!\n");
 
 	while(1) {
 		struct sockaddr_in clientAddr;

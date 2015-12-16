@@ -140,10 +140,12 @@ int getRequest(int client) {
 	char *fileType = getFileExtension(filePath);
 	
 	// Compare fileType to the different supported filetypes
-	if (strcmp(fileType, "jpg") == 0 || strcmp(fileType, "jpeg") == 0 || strcmp(fileType, "gif") == 0) {
+	if (strcmp(fileType, "jpg") == 0 || strcmp(fileType, "jpeg") == 0 || strcmp(fileType, "gif") == 0 || strcmp(fileType, "png") == 0) {
 		// Write the content type		
 		if (strcmp(fileType, "gif") == 0) {
 			sprintf(output, "Content-Type: image/gif\n\n");
+		} else if (strcmp(fileType, "png") == 0) {
+			sprintf(output, "Content-Type: image/png\n\n");
 		} else {
 			sprintf(output, "Content-Type: image/jpeg\n\n");
 		}
